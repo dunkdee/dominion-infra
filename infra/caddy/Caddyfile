@@ -10,3 +10,10 @@ https://dominionhealing.org, https://www.dominionhealing.org {
   file_server
   tls { issuer acme { disable_tlsalpn_challenge email automation@dominionhealing.org } }
 }
+
+# HTTP for n8n: serve ACME token; redirect everything else
+http://n8n.dominionhealing.org {
+  @acme path /.well-known/acme-challenge/*
+  handle @acme { respond 200 }
+  handle { redir https://{host}{uri} 308 }
+}
