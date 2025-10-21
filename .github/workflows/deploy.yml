@@ -21,8 +21,9 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          rsync -az -e "ssh -i key -p \${SSH_PORT:-22} -o StrictHostKeyChecking=no" \
-            infra/ "\${SSH_USER}@\${SSH_HOST}:/opt/dominion/infra/"
+          PORT=${SSH_PORT:-22}
+          rsync -az -e "ssh -i key -p $PORT -o StrictHostKeyChecking=no" \
+            infra/ "$SSH_USER@$SSH_HOST:/opt/dominion/infra/"
 
       - name: Compose up
         env:
@@ -30,6 +31,7 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          ssh -i key -p \${SSH_PORT:-22} -o StrictHostKeyChecking=no \
-            "\${SSH_USER}@\${SSH_HOST}" \
+          PORT=${SSH_PORT:-22}
+          ssh -i key -p $PORT -o StrictHostKeyChecking=no \
+            "${SSH_USER}@${SSH_HOST}" \
             "sudo -n docker compose -f /opt/dominion/infra/docker-compose.yml up -d"
