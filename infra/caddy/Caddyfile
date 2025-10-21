@@ -1,0 +1,12 @@
+# HTTP: serve ACME token; redirect the rest
+http://dominionhealing.org, http://www.dominionhealing.org {
+  @acme path /.well-known/acme-challenge/*
+  handle @acme { root * /var/www/dominionhealing; file_server }
+  handle { redir https://{host}{uri} 308 }
+}
+# HTTPS: normal site
+https://dominionhealing.org, https://www.dominionhealing.org {
+  root * /var/www/dominionhealing
+  file_server
+  tls { issuer acme { disable_tlsalpn_challenge email automation@dominionhealing.org } }
+}
