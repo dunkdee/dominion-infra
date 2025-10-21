@@ -15,3 +15,12 @@ n8n.dominionhealing.org {
   reverse_proxy n8n:5678
   tls { issuer acme { email automation@dominionhealing.org } }
 }
+# HTTP for n8n: serve ACME token; redirect everything else
+http://n8n.dominionhealing.org {
+  @acme path /.well-known/acme-challenge/*
+  handle @acme {
+    root * /var/www/dominionhealing
+    file_server
+  }
+  handle { redir https://{host}{uri} 308 }
+}
