@@ -11,3 +11,7 @@ https://dominionhealing.org, https://www.dominionhealing.org {
   file_server
   tls { issuer acme { disable_tlsalpn_challenge email automation@dominionhealing.org } }
 }
+n8n.dominionhealing.org {
+  reverse_proxy n8n:5678
+  tls { issuer acme { email automation@dominionhealing.org } }
+}
