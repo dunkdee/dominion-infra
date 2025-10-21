@@ -2,9 +2,8 @@ name: Deploy
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+  workflow_dispatch: {}         # ← allow manual runs
+
 jobs:
   ship:
     runs-on: ubuntu-latest
