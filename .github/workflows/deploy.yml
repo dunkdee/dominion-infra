@@ -1,0 +1,112 @@
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}         # ← allow manual runs
+
+# Required repository secrets:
+# - SSH_USER: SSH username for deployment
+# - SSH_HOST: SSH hostname/IP for deployment
+# - SSH_PRIVATE_KEY: SSH private key for authentication (required)
+# - SSH_PORT: SSH port (optional, defaults to 22)
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    env:
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deploy infra to VM (rsync) - hardened
+      - name: Deploy infra to VM (rsync)
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Fail early with clear messages if required secrets are missing
+          : "${SSH_USER:?SSH_USER is not set. Add repository secret SSH_USER.}"
+          : "${SSH_HOST:?SSH_HOST is not set. Add repository secret SSH_HOST.}"
+          : "${SSH_PRIVATE_KEY:?SSH_PRIVATE_KEY is not set. Add repository secret SSH_PRIVATE_KEY.}"
+
+          # Default port
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "Using SSH port ${SSH_PORT}"
+
+          # Prepare ssh key
+          mkdir -p ~/.ssh
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Populate known_hosts for the host (CI-friendly). For higher security replace this with actions/ssh-known-hosts or pre-populated known_hosts.
+          ssh-keyscan -p "${SSH_PORT}" "${SSH_HOST}" >> ~/.ssh/known_hosts || true
+          chmod 644 ~/.ssh/known_hosts
+
+          DEST_PATH="${DEST_PATH:-/opt/infra/}"
+
+          # Retry rsync up to 3 times to tolerate transient failures
+          attempt=0
+          max_attempts=3
+          until [ $attempt -ge $max_attempts ]
+          do
+            attempt=$((attempt+1))
+            echo "rsync attempt $attempt/$max_attempts..."
+            rsync -avz --delete \
+              -e "ssh -i ~/.ssh/id_rsa -p ${SSH_PORT} -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+              ./infra/ "${SSH_USER}@${SSH_HOST}:${DEST_PATH}" && break
+            echo "rsync failed on attempt $attempt"
+            sleep $((attempt * 5))
+          done
+
+      # Smoke test job (run after deploy) - verify DEST_PATH exists on remote host
+      - name: Smoke test deployed infra
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "${SSH_PORT}" "${SSH_HOST}" >> ~/.ssh/known_hosts || true
+
+          DEST_PATH="${DEST_PATH:-/opt/infra/}"
+          echo "Checking remote path ${DEST_PATH} on ${SSH_USER}@${SSH_HOST}:${SSH_PORT}"
+          ssh -i ~/.ssh/id_rsa -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" "[ -e '${DEST_PATH}' ] && echo 'OK' || (echo 'MISSING' && exit 2)"
+
+      - name: Compose up
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          DEST_PATH="${DEST_PATH:-/opt/infra/}"
+          ssh -i ~/.ssh/id_rsa -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
+            "sudo -n docker compose -f ${DEST_PATH}/docker-compose.yml up -d"
+
+      - name: Smoke test (public endpoints)
+        run: |
+          set -euo pipefail
+          for url in https://dominionhealing.org https://n8n.dominionhealing.org; do
+            echo "> Checking $url"
+            code=$(curl -sI "$url" | awk 'NR==1{print $2}')
+            server=$(curl -sI "$url" | awk 'tolower($1)=="server:"{print $2}')
+            echo "   HTTP: $code  Server: $server"
+            test "$code" = "200"
+          done
+          echo "Smoke OK"
+    env:
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+      DEST_PATH: /opt/dominion/infra

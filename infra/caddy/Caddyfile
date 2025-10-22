@@ -4,9 +4,25 @@ http://dominionhealing.org, http://www.dominionhealing.org {
   handle @acme { root * /var/www/dominionhealing; file_server }
   handle { redir https://{host}{uri} 308 }
 }
+
 # HTTPS: normal site
 https://dominionhealing.org, https://www.dominionhealing.org {
+  header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
   root * /var/www/dominionhealing
   file_server
   tls { issuer acme { disable_tlsalpn_challenge email automation@dominionhealing.org } }
+}
+n8n.dominionhealing.org {
+  header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+  reverse_proxy n8n:5678
+  tls { issuer acme { email automation@dominionhealing.org } }
+}
+# HTTP for n8n: serve ACME token; redirect everything else
+http://n8n.dominionhealing.org {
+  @acme path /.well-known/acme-challenge/*
+  handle @acme {
+    root * /var/www/dominionhealing
+    file_server
+  }
+  handle { redir https://{host}{uri} 308 }
 }
