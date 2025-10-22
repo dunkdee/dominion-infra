@@ -95,3 +95,6 @@ jobs:
           DEST_PATH="${DEST_PATH:-/opt/infra/}"
           ssh -i ~/.ssh/id_rsa -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
             "sudo -n docker compose -f ${DEST_PATH}/docker-compose.yml up -d"
+    env:
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+      DEST_PATH: /opt/dominion/infra
