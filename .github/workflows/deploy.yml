@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
+      DEST_PATH: /opt/dominion/infra
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +96,15 @@ jobs:
           DEST_PATH="${DEST_PATH:-/opt/infra/}"
           ssh -i ~/.ssh/id_rsa -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" \
             "sudo -n docker compose -f ${DEST_PATH}/docker-compose.yml up -d"
-    env:
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY }}
-      DEST_PATH: /opt/dominion/infra
+
+      - name: Smoke test (public endpoints)
+        run: |
+          set -euo pipefail
+          for url in https://dominionhealing.org https://n8n.dominionhealing.org; do
+            echo "> Checking $url"
+            code=$(curl -sI "$url" | awk 'NR==1{print $2}')
+            server=$(curl -sI "$url" | awk 'tolower($1)=="server:"{print $2}')
+            echo "   HTTP: $code  Server: $server"
+            test "$code" = "200"
+          done
+          echo "Smoke OK"
