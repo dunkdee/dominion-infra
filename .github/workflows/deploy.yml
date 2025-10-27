@@ -1,0 +1,78 @@
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}         # ← allow manual runs
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Write SSH private key to file with secure permissions
+      # The key file persists for use in both rsync and ssh steps
+      - name: Write SSH key
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          set -euo pipefail
+          echo "$SSH_KEY" > key
+          chmod 600 key
+
+      # Rsync infrastructure files to remote VM
+      # Optional environment variables:
+      #   RSYNC_USE_SUDO=true - adds --rsync-path="sudo rsync" for writing to protected dirs
+      #   RSYNC_DRY_RUN=true - runs initial --dry-run to preview changes before real sync
+      - name: Rsync infra to VM
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          RSYNC_USE_SUDO: ${{ secrets.RSYNC_USE_SUDO }}
+          RSYNC_DRY_RUN: ${{ secrets.RSYNC_DRY_RUN }}
+        run: |
+          set -euo pipefail
+          PORT=${SSH_PORT:-22}
+          
+          # Populate known_hosts using ssh-keyscan to avoid StrictHostKeyChecking=no
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$PORT" "$SSH_HOST" > ~/.ssh/known_hosts
+          
+          # Build rsync command with optional sudo support
+          RSYNC_CMD="rsync -az"
+          if [ "${RSYNC_USE_SUDO:-false}" = "true" ]; then
+            RSYNC_CMD="$RSYNC_CMD --rsync-path=\"sudo rsync\""
+          fi
+          
+          # Optional dry-run to preview changes
+          if [ "${RSYNC_DRY_RUN:-false}" = "true" ]; then
+            echo "Running rsync --dry-run to preview changes..."
+            eval "$RSYNC_CMD" --dry-run -e "ssh -i key -p $PORT -o UserKnownHostsFile=~/.ssh/known_hosts" \
+              infra/ "$SSH_USER@$SSH_HOST:/opt/dominion/infra/"
+            echo "Dry-run complete. Proceeding with actual sync..."
+          fi
+          
+          # Perform actual rsync
+          eval "$RSYNC_CMD" -e "ssh -i key -p $PORT -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            infra/ "$SSH_USER@$SSH_HOST:/opt/dominion/infra/"
+
+      # Run docker compose on remote VM using sudo
+      # Cleans up SSH key file after completion
+      - name: Compose up
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -euo pipefail
+          PORT=${SSH_PORT:-22}
+          
+          # Run docker compose with sudo on remote host
+          ssh -i key -p "$PORT" -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "$SSH_USER@$SSH_HOST" \
+            "sudo -n docker compose -f /opt/dominion/infra/docker-compose.yml up -d"
+          
+          # Securely remove SSH key file
+          rm -f key
