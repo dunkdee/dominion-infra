@@ -1,0 +1,64 @@
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}         # ← allow manual runs
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write SSH key
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          set -euo pipefail
+          echo "${SSH_KEY}" > key
+          chmod 600 key
+
+      - name: Rsync infra to VM
+        env:
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          
+          # Ensure required secrets/vars are present (fail early with a helpful message)
+          : "${SSH_USER:?SSH_USER is not set. Add repository secret SSH_USER.}"
+          : "${SSH_HOST:?SSH_HOST is not set. Add repository secret SSH_HOST.}"
+          
+          # Default to port 22 if SSH_PORT is not set
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "Using SSH port $SSH_PORT"
+          
+          # Destination path on the VM
+          DEST_PATH="/opt/dominion/infra/"
+          
+          rsync -avz --delete \
+            -e "ssh -i key -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+            ./infra/ "${SSH_USER}@${SSH_HOST}:${DEST_PATH}"
+
+      - name: Compose up
+        env:
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          
+          # Ensure required secrets/vars are present
+          : "${SSH_USER:?SSH_USER is not set. Add repository secret SSH_USER.}"
+          : "${SSH_HOST:?SSH_HOST is not set. Add repository secret SSH_HOST.}"
+          
+          # Default to port 22 if SSH_PORT is not set
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "Using SSH port $SSH_PORT"
+          
+          ssh -i key -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${SSH_USER}@${SSH_HOST}" \
+            "sudo -n docker compose -f /opt/dominion/infra/docker-compose.yml up -d"
